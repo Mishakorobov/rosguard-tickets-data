@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-verify.py — Валидатор целостности и генератор манифеста билетов Росгвардии.
-Проверяет структуру questions.json и questions_private.json, вычисляет SHA-256
-и обновляет questions_manifest.json перед коммитом.
+verify.py — Строгий валидатор целостности и генератор манифеста билетов Росгвардии.
+Проверяет:
+1. Полноту предложений и знаков препинания (защита от обрыва фраз на полуслове).
+2. Наличие всех заголовков разделов и нумерации вопросов.
+3. Корректность разделения по официальным главам Росгвардии.
+4. Варианты ответов (не менее 2, без дублей, без обрывов) и валидность correctAnswerIndex.
+5. Вычисляет криптографические хэши SHA-256 и обновляет questions_manifest.json.
 """
 
 import os
@@ -11,6 +15,8 @@ import sys
 import json
 import hashlib
 from datetime import datetime
+
+VALID_QUESTION_ENDINGS = ('?', ':', '.', '!', '»', '"', ')', ';')
 
 def compute_sha256(filepath: str) -> str:
     """Вычисляет хэш SHA-256 файла."""
@@ -20,8 +26,8 @@ def compute_sha256(filepath: str) -> str:
             hasher.update(chunk)
     return hasher.hexdigest().lower()
 
-def validate_questions_file(filepath: str, min_expected_questions: int, name: str):
-    """Строгая валидация структуры файла вопросов."""
+def validate_questions_file(filepath: str, min_expected_questions: int, expected_sections_count: int, name: str):
+    """Глубокая валидация структуры, грамматической полноты и разделов файла билетов."""
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"Файл {filepath} ({name}) не найден!")
 
@@ -33,6 +39,11 @@ def validate_questions_file(filepath: str, min_expected_questions: int, name: st
 
     if not isinstance(data, list) or len(data) == 0:
         raise ValueError(f"Файл {filepath} должен содержать непустой массив разделов.")
+
+    if len(data) < expected_sections_count:
+        raise ValueError(
+            f"Файл {name}: количество разделов ({len(data)}) меньше ожидаемого ({expected_sections_count})!"
+        )
 
     total_questions = 0
     section_ids = set()
@@ -51,11 +62,11 @@ def validate_questions_file(filepath: str, min_expected_questions: int, name: st
             raise ValueError(f"Дублирующийся id раздела '{sec_id}' в {filepath}")
         section_ids.add(sec_id)
 
-        if not title or not isinstance(title, str) or not title.strip():
-            raise ValueError(f"Раздел '{sec_id}' имеет пустое название в {filepath}")
+        if not title or not isinstance(title, str) or len(title.strip()) < 5:
+            raise ValueError(f"Раздел '{sec_id}' имеет слишком короткое или пустое название в {filepath}")
 
-        if not isinstance(questions, list) or len(questions) == 0:
-            raise ValueError(f"Раздел '{sec_id}' не содержит вопросов в {filepath}")
+        if not isinstance(questions, list) or len(questions) < 3:
+            raise ValueError(f"Раздел '{sec_id}' ('{title}') содержит менее 3 вопросов (аномалия структуры)")
 
         for q_idx, q in enumerate(questions):
             total_questions += 1
@@ -67,19 +78,36 @@ def validate_questions_file(filepath: str, min_expected_questions: int, name: st
             options = q.get('options')
             correct_idx = q.get('correctAnswerIndex')
 
+            # 1. Заголовок и идентификатор вопроса
             if not q_id:
-                raise ValueError(f"В вопросе #{q_idx} раздела '{sec_id}' отсутствует 'id'")
+                raise ValueError(f"В вопросе #{q_idx} раздела '{sec_id}' отсутствует идентификатор 'id'")
 
-            if not q_text or not isinstance(q_text, str) or not q_text.strip():
-                raise ValueError(f"Вопрос {q_id} имеет пустой текст")
+            # 2. Текст вопроса: не пустой, достаточной длины
+            if not q_text or not isinstance(q_text, str) or len(q_text.strip()) < 10:
+                raise ValueError(f"Вопрос {q_id} имеет пустой или подозрительно короткий текст: '{q_text}'")
 
-            if not isinstance(options, list) or len(options) < 2:
-                raise ValueError(f"Вопрос {q_id} имеет менее 2 вариантов ответа ({options})")
+            clean_text = q_text.strip()
 
+            # 3. Защита от обрыва конца предложения
+            if not clean_text.endswith(VALID_QUESTION_ENDINGS):
+                raise ValueError(
+                    f"Вопрос {q_id} обрывается на полуслове без знака препинания: '...{clean_text[-40:]}'"
+                )
+
+            # 4. Варианты ответов
+            if not isinstance(options, list) or len(options) < 2 or len(options) > 6:
+                raise ValueError(f"Вопрос {q_id} имеет недопустимое число вариантов ({len(options) if isinstance(options, list) else 0})")
+
+            seen_options = set()
             for opt_idx, opt in enumerate(options):
-                if not isinstance(opt, str) or not opt.strip():
-                    raise ValueError(f"Вопрос {q_id}: пустой вариант ответа #{opt_idx}")
+                if not isinstance(opt, str) or len(opt.strip()) < 2:
+                    raise ValueError(f"Вопрос {q_id}: пустой или оборванный вариант ответа #{opt_idx+1}")
+                opt_norm = opt.strip().lower()
+                if opt_norm in seen_options:
+                    raise ValueError(f"Вопрос {q_id}: дублирующийся вариант ответа #{opt_idx+1}: '{opt.strip()}'")
+                seen_options.add(opt_norm)
 
+            # 5. Индекс правильного ответа
             if not isinstance(correct_idx, int) or correct_idx < 0 or correct_idx >= len(options):
                 raise ValueError(
                     f"Вопрос {q_id}: некорректный correctAnswerIndex={correct_idx} при {len(options)} вариантах"
@@ -90,7 +118,7 @@ def validate_questions_file(filepath: str, min_expected_questions: int, name: st
             f"В файле {name} обнаружено всего {total_questions} вопросов, что меньше порога {min_expected_questions}!"
         )
 
-    print(f"[{name}] Валидация успешна: {len(data)} разделов, {total_questions} вопросов.")
+    print(f"[{name}] Валидация успешна: {len(data)} разделов, {total_questions} вопросов. Тексты и знаки препинания проверены.")
     return len(data), total_questions
 
 def update_manifest(root_dir: str):
@@ -99,12 +127,12 @@ def update_manifest(root_dir: str):
     vohr_path = os.path.join(root_dir, 'questions.json')
     private_path = os.path.join(root_dir, 'questions_private.json')
 
-    # Валидация ВОХР (минимум 200 вопросов)
-    vohr_sections, vohr_count = validate_questions_file(vohr_path, 200, "ВОХР")
+    # Валидация ВОХР (ожидается 5 разделов, минимум 230 вопросов)
+    vohr_sections, vohr_count = validate_questions_file(vohr_path, 230, 5, "ВОХР")
     vohr_sha256 = compute_sha256(vohr_path)
 
-    # Валидация ЧОП (минимум 190 вопросов)
-    private_sections, private_count = validate_questions_file(private_path, 190, "ЧОП")
+    # Валидация ЧОП (ожидается 6 разделов, минимум 200 вопросов)
+    private_sections, private_count = validate_questions_file(private_path, 200, 6, "ЧОП")
     private_sha256 = compute_sha256(private_path)
 
     if not os.path.exists(manifest_path):
@@ -124,7 +152,6 @@ def update_manifest(root_dir: str):
     today = datetime.now().strftime("%Y-%m-%d")
     manifest["updated_at"] = today
 
-    # Обновляем ссылки на новый публичный репозиторий rosguard-tickets-data
     manifest["vohr"] = {
         "url": "https://raw.githubusercontent.com/Mishakorobov/rosguard-tickets-data/main/questions.json",
         "sha256": vohr_sha256,
