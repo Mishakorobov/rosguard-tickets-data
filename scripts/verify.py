@@ -19,12 +19,12 @@ from datetime import datetime
 VALID_QUESTION_ENDINGS = ('?', ':', '.', '!', '»', '"', ')', ';')
 
 def compute_sha256(filepath: str) -> str:
-    """Вычисляет хэш SHA-256 файла."""
-    hasher = hashlib.sha256()
+    """Вычисляет хэш SHA-256 файла с нормализацией переносов строк (CRLF -> LF)."""
     with open(filepath, 'rb') as f:
-        while chunk := f.read(65536):
-            hasher.update(chunk)
-    return hasher.hexdigest().lower()
+        content = f.read()
+    # Нормализуем CRLF к LF для единого хэша независимо от ОС (Windows/Linux/Android)
+    normalized = content.replace(b'\r\n', b'\n')
+    return hashlib.sha256(normalized).hexdigest().lower()
 
 def validate_questions_file(filepath: str, min_expected_questions: int, expected_sections_count: int, name: str):
     """Глубокая валидация структуры, грамматической полноты и разделов файла билетов."""

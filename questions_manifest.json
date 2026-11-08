@@ -6,13 +6,13 @@
   "rosguard_pdf_url": "https://rosguard.gov.ru/uploads/2026/08/voprosydlyaperiodicheskojjproverki.pdf",
   "vohr": {
     "url": "https://raw.githubusercontent.com/Mishakorobov/rosguard-tickets-data/main/questions.json",
-    "sha256": "91fdb61b91edccf205c7c44b26badd4bb3ab4afb1f181a8e36bff7da804bdff9",
+    "sha256": "d85776a32d1741a424dc67c823556539703d08f2bdf4a21c9884d02d55bb75d7",
     "questions_count": 235,
     "sections_count": 5
   },
   "private_guard": {
     "url": "https://raw.githubusercontent.com/Mishakorobov/rosguard-tickets-data/main/questions_private.json",
-    "sha256": "0d3aaa538d76551a3aec04182859c3adbdaaacf289aaae0e6424fad6c5eca443",
+    "sha256": "1403ebcfde67d5499b11934ceb98a5bb343e694fb4a9b4e6cd39bf7976990266",
     "questions_count": 205,
     "sections_count": 6
   }
