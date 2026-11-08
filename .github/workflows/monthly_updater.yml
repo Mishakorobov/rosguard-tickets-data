@@ -1,0 +1,53 @@
+name: Monthly Rosguard Tickets Updater
+
+on:
+  schedule:
+    # Запуск 1-го числа каждого месяца в 03:00 UTC
+    - cron: '0 3 1 * *'
+  workflow_dispatch: # Возможность ручного запуска из интерфейса GitHub
+
+permissions:
+  contents: write
+
+jobs:
+  check-and-update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Run Autoparser
+        run: |
+          python scripts/parser.py
+
+      - name: Verify data integrity and update manifest
+        run: |
+          python scripts/verify.py
+
+      - name: Commit and push changes if updated
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if [ -n "$(git status --porcelain questions.json questions_private.json questions_manifest.json)" ]; then
+            echo "Обнаружены обновления в файлах билетов. Коммитим..."
+            git add questions.json questions_private.json questions_manifest.json
+            git commit -m "Auto-update: актуализация билетов Росгвардии [skip ci]"
+            git push
+            echo "Изменения успешно отправлены в репозиторий!"
+          else
+            echo "Изменений нет. Текущая база билетов актуальна."
+          fi

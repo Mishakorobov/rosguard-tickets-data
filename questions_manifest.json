@@ -1,0 +1,19 @@
+{
+  "year": 2026,
+  "version": "1.1.0",
+  "updated_at": "2026-11-08",
+  "rosguard_page_url": "https://rosguard.gov.ru/page/index/licenzionnorazreshitelnaya-rabota/",
+  "rosguard_pdf_url": "https://rosguard.gov.ru/uploads/2026/08/voprosydlyaperiodicheskojjproverki.pdf",
+  "vohr": {
+    "url": "https://raw.githubusercontent.com/Mishakorobov/rosguard-tickets-data/main/questions.json",
+    "sha256": "324e909c08edb2fb1cccb7ebd23569952ea87b6b133c723734adab74098887f4",
+    "questions_count": 235,
+    "sections_count": 5
+  },
+  "private_guard": {
+    "url": "https://raw.githubusercontent.com/Mishakorobov/rosguard-tickets-data/main/questions_private.json",
+    "sha256": "0d3aaa538d76551a3aec04182859c3adbdaaacf289aaae0e6424fad6c5eca443",
+    "questions_count": 205,
+    "sections_count": 6
+  }
+}
