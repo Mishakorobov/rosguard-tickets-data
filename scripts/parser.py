@@ -156,8 +156,9 @@ def parse_questions_from_text(raw_text: str, profession_type: str = "vohr") -> l
                 current_question['correctAnswerIndex'] = len(current_question['options']) - 1
             continue
 
-        # Правовое обоснование / статья закона
-        if current_question and ('статья' in line.lower() or 'фз' in line.lower() or 'обоснование' in line.lower()):
+        # Правовое обоснование / статья закона (только после вариантов ответов)
+        is_citation_start = bool(re.match(r'^\s*\(?(статья|ст\.|правовое\s+обоснование|обоснование|федеральный\s+закон|фз\s+№|\(\s*фз)', line, re.IGNORECASE))
+        if current_question and current_question['options'] and (is_citation_start or current_question.get('explanation')):
             if current_question.get('explanation'):
                 current_question['explanation'] += "\n" + line
             else:
@@ -176,12 +177,24 @@ def parse_questions_from_text(raw_text: str, profession_type: str = "vohr") -> l
 
     return sections
 
-def run_autoparser():
+def run_autoparser(local_file=None, profession_type='vohr'):
     """Основной цикл робота-автопарсера."""
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     print("==================================================================")
     print(f"Запуск робота-автопарсера билетов Росгвардии [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]")
+    if local_file:
+        print(f"Режим локального файла: {local_file} (профессия: {profession_type})")
     print("==================================================================")
+
+    if local_file:
+        if not os.path.exists(local_file):
+            print(f"Ошибка: файл {local_file} не найден.")
+            return False
+        with open(local_file, 'r', encoding='utf-8', errors='ignore') as f:
+            text = f.read()
+        sections = parse_questions_from_text(text)
+        print(f"Успешно распарсено: {len(sections)} разделов.")
+        return len(sections) > 0
 
     session = requests.Session()
     session.headers.update(HEADERS)
@@ -199,9 +212,9 @@ def run_autoparser():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Робот-автопарсер билетов Росгвардии")
-    parser.add_argument("--file", help="Локальный PDF/DOCX файл для парсинга")
+    parser.add_argument("--file", help="Локальный PDF/DOCX/TXT файл для парсинга")
     parser.add_argument("--type", choices=["vohr", "private"], default="vohr", help="Тип вопросов")
     args = parser.parse_args()
 
-    success = run_autoparser()
+    success = run_autoparser(local_file=args.file, profession_type=args.type)
     sys.exit(0 if success else 1)
