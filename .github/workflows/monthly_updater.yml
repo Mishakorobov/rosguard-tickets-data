@@ -4,21 +4,39 @@ on:
   schedule:
     # Запуск 1-го числа каждого месяца в 03:00 UTC
     - cron: '0 3 1 * *'
-  workflow_dispatch: # Возможность ручного запуска из интерфейса GitHub
+  workflow_dispatch:
+    inputs:
+      force_run:
+        description: 'Force full parser + verify run even if pre-check shows no changes'
+        required: false
+        type: boolean
+        default: false
+      force_sync:
+        description: 'Dispatch sync event to mobile apps even if no new data committed'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
 
 jobs:
   check-and-update:
+    name: Pre-Check, Parse, Release & Dispatch
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     env:
       PYTHONIOENCODING: utf-8
+
     steps:
-      - name: Checkout repository
+      - name: Checkout repository (shallow)
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -26,20 +44,26 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Install dependencies
+      - name: Lightweight Pre-Check (stdlib, 0 pip deps)
+        id: precheck
+        run: python scripts/precheck.py
+
+      - name: Install parser dependencies (only when update detected or forced)
+        if: steps.precheck.outputs.needs_update == 'true' || inputs.force_run == true
         run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements.txt ]; then pip install --disable-pip-version-check -r requirements.txt; fi
 
       - name: Run Autoparser
-        run: |
-          python scripts/parser.py
+        if: steps.precheck.outputs.needs_update == 'true' || inputs.force_run == true
+        run: python scripts/parser.py
 
       - name: Verify data integrity and update manifest
-        run: |
-          python scripts/verify.py
+        if: steps.precheck.outputs.needs_update == 'true' || inputs.force_run == true
+        run: python scripts/verify.py
 
-      - name: Commit and push changes if updated
+      - name: Commit, push and publish release tag if updated
+        id: publish
+        if: steps.precheck.outputs.needs_update == 'true' || inputs.force_run == true
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -49,7 +73,48 @@ jobs:
             git add questions.json questions_private.json questions_manifest.json
             git commit -m "Auto-update: актуализация билетов Росгвардии [skip ci]"
             git push
-            echo "Изменения успешно отправлены в репозиторий!"
+            TAG="v$(date -u +'%Y.%m.%d')"
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+            echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
           else
             echo "Изменений нет. Текущая база билетов актуальна."
+            echo "updated=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Create GitHub Release for updated data
+        if: steps.publish.outputs.updated == 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.publish.outputs.release_tag }}
+          name: "База билетов Росгвардии (${{ steps.publish.outputs.release_tag }})"
+          generate_release_notes: true
+
+      - name: Dispatch tickets-updated event to mobile apps
+        if: steps.publish.outputs.updated == 'true' || inputs.force_sync == true
+        env:
+          SYNC_TOKEN: ${{ secrets.rosguard_sync_dispatch }}
+        run: |
+          if [ -z "$SYNC_TOKEN" ]; then
+            echo "::warning::Secret rosguard_sync_dispatch не задан — пропуск кросс-репозиторного dispatch."
+            exit 0
+          fi
+          python3 - <<'PY'
+          import json, os, urllib.request
+          token = os.environ["SYNC_TOKEN"]
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "Content-Type": "application/json",
+              "User-Agent": "RosguardDataDispatcher",
+          }
+          payload = json.dumps({
+              "event_type": "tickets-updated",
+              "client_payload": {"ref": "main"},
+          }).encode("utf-8")
+          for repo in ("Bilety_vohr_testy_2026", "private_guard_bilety"):
+              url = f"https://api.github.com/repos/Mishakorobov/{repo}/dispatches"
+              req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+              with urllib.request.urlopen(req, timeout=15) as resp:
+                  print(f"Dispatched tickets-updated -> {repo}: HTTP {resp.status}")
+          PY

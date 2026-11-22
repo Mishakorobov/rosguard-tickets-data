@@ -1,0 +1,20 @@
+name: FinOps Cache Janitor
+
+on:
+  schedule:
+    - cron: '0 4 * * 0'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup:
+    uses: Mishakorobov/.github/.github/workflows/reusable-cache-janitor.yml@v1
+    with:
+      max-age-days: 7

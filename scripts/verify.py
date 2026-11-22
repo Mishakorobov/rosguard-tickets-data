@@ -149,29 +149,38 @@ def update_manifest(root_dir: str):
         with open(manifest_path, 'r', encoding='utf-8') as f:
             manifest = json.load(f)
 
-    today = datetime.now().strftime("%Y-%m-%d")
-    manifest["updated_at"] = today
-
-    manifest["vohr"] = {
+    new_vohr = {
         "url": "https://raw.githubusercontent.com/Mishakorobov/rosguard-tickets-data/main/questions.json",
         "sha256": vohr_sha256,
         "questions_count": vohr_count,
         "sections_count": vohr_sections
     }
 
-    manifest["private_guard"] = {
+    new_private = {
         "url": "https://raw.githubusercontent.com/Mishakorobov/rosguard-tickets-data/main/questions_private.json",
         "sha256": private_sha256,
         "questions_count": private_count,
         "sections_count": private_sections
     }
 
-    with open(manifest_path, 'w', encoding='utf-8') as f:
-        json.dump(manifest, f, ensure_ascii=False, indent=2)
-        f.write('\n')
+    data_changed = (
+        manifest.get("vohr") != new_vohr
+        or manifest.get("private_guard") != new_private
+    )
 
-    print("==================================================================")
-    print("Манифест questions_manifest.json успешно обновлен:")
+    if data_changed or not manifest.get("updated_at"):
+        manifest["updated_at"] = datetime.now().strftime("%Y-%m-%d")
+
+    manifest["vohr"] = new_vohr
+    manifest["private_guard"] = new_private
+
+    if data_changed or not os.path.exists(manifest_path):
+        with open(manifest_path, 'w', encoding='utf-8') as f:
+            json.dump(manifest, f, ensure_ascii=False, indent=2)
+            f.write('\n')
+        print("Манифест questions_manifest.json успешно обновлен (обнаружены изменения данных):")
+    else:
+        print("Манифест questions_manifest.json уже актуален (данные не изменились):")
     print(f"  • ВОХР: {vohr_count} вопросов ({vohr_sections} разделов), SHA-256: {vohr_sha256}")
     print(f"  • ЧОП:  {private_count} вопросов ({private_sections} разделов), SHA-256: {private_sha256}")
     print("==================================================================")
